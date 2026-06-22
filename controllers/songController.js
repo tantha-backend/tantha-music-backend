@@ -164,8 +164,6 @@ const getSongsByArtist = async (req, res) => {
 
 const playSong = async (req, res) => {
   try {
-    console.log("REQ USER:", req.user);
-
     const song = await Song.findOne({
       _id: req.params.id,
       isPublished: true,
@@ -205,20 +203,12 @@ const playSong = async (req, res) => {
     song.playCount += 1;
     await song.save();
 
-    let historyRecord = null;
-
     if (req.user && req.user.id) {
-      console.log("CREATING HISTORY FOR:", req.user.id);
-
-      historyRecord = await ListeningHistory.create({
+      await ListeningHistory.create({
         userId: req.user.id,
         songId: song._id,
         playedAt: new Date(),
       });
-
-      console.log("HISTORY CREATED:", historyRecord._id);
-    } else {
-      console.log("NO USER FOUND, HISTORY NOT CREATED");
     }
 
     res.status(200).json({
@@ -226,12 +216,8 @@ const playSong = async (req, res) => {
       message: "Song play recorded",
       song,
       streamUrl: song.audio128,
-      historySaved: !!historyRecord,
-      historyRecord,
     });
   } catch (error) {
-    console.log("PLAY SONG ERROR:", error);
-
     res.status(500).json({
       success: false,
       message: "Failed to play song",
