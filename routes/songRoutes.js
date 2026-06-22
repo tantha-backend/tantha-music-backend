@@ -38,8 +38,7 @@ router.get("/artist/:artistId", getSongsByArtist);
 
 router.get("/liked/me", authMiddleware, getLikedSongs);
 
-router.put("/play/:id", playSong);
-
+router.put("/play/:id", authMiddleware, playSong);
 router.put("/like/:id", authMiddleware, likeSong);
 
 router.put("/:songId/album/:albumId", authMiddleware, addSongToAlbum);
