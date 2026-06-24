@@ -7,6 +7,7 @@ const {
   followArtist,
   getFollowingArtists,
   getArtistProfile,
+  getAllArtists,
 } = require("../controllers/artistController");
 
 const protect = require("../middleware/authMiddleware");
@@ -35,6 +36,8 @@ router.put(
 router.put("/follow/:artistId", protect, followArtist);
 
 router.get("/following/me", protect, getFollowingArtists);
+
+router.get("/", getAllArtists);
 
 router.get("/profile/:artistId", protect, getArtistProfile);
 

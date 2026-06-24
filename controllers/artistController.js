@@ -252,11 +252,31 @@ const updateMyArtistProfile = async (req, res) => {
   }
 };
 
+const getAllArtists = async (req, res) => {
+  try {
+    const artists = await Artist.find()
+      .select("_id stageName name profileImage coverImage followersCount createdAt")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: artists.length,
+      artists,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch artists",
+      error: error.message,
+    });
+  }
+};
 
 module.exports = {
   createArtistProfile,
-  updateMyArtistProfile ,
+  updateMyArtistProfile,
   followArtist,
   getFollowingArtists,
   getArtistProfile,
+  getAllArtists,
 };
