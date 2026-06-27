@@ -12,6 +12,7 @@ const getAdminDashboard = async (req, res) => {
 
     const pendingSongs = await Song.countDocuments({
       isPublished: false,
+      isRejected: { $ne: true },
     });
 
     const premiumUsers = await User.countDocuments({
@@ -99,7 +100,99 @@ const getAllAdminSongs = async (req, res) => {
   }
 };
 
+const getPendingSongs = async (req, res) => {
+  try {
+    const songs = await Song.find({
+      isPublished: false,
+      isRejected: { $ne: true },
+    })
+      .populate("artistId", "stageName bio profileImage")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: songs.length,
+      songs,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch pending songs",
+      error: error.message,
+    });
+  }
+};
+
+const approveSong = async (req, res) => {
+  try {
+    const song = await Song.findById(req.params.id);
+
+    if (!song) {
+      return res.status(404).json({
+        success: false,
+        message: "Song not found",
+      });
+    }
+
+    song.isPublished = true;
+    song.isRejected = false;
+    song.rejectionReason = "";
+    song.approvedAt = new Date();
+    song.approvedBy = req.user.id;
+
+    await song.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Song approved and published successfully",
+      song,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to approve song",
+      error: error.message,
+    });
+  }
+};
+
+const rejectSong = async (req, res) => {
+  try {
+    const song = await Song.findById(req.params.id);
+
+    if (!song) {
+      return res.status(404).json({
+        success: false,
+        message: "Song not found",
+      });
+    }
+
+    song.isPublished = false;
+    song.isRejected = true;
+    song.rejectionReason = req.body.reason || "Rejected by admin";
+    song.approvedAt = null;
+    song.approvedBy = null;
+
+    await song.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Song rejected successfully",
+      song,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to reject song",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAdminDashboard,
   getAllAdminSongs,
+  getPendingSongs,
+  approveSong,
+  rejectSong,
 };
