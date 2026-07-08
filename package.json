@@ -1,17 +1,22 @@
 {
-  "name": "backend",
+  "name": "tantha-music-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Tantha Music backend API",
+  "main": "server.js",
+  "type": "commonjs",
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
     "s3:test": "node scripts/testS3.js"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "tantha",
+    "music",
+    "backend",
+    "api"
+  ],
+  "author": "Tantha Music",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1069.0",
     "bcryptjs": "^3.0.3",
@@ -33,5 +38,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
