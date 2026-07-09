@@ -26,18 +26,32 @@ const { helmet, limiter } = require("./middleware/securityMiddleware");
 const app = express();
 
 app.set("trust proxy", 1);
-
 app.disable("x-powered-by");
 
-app.use(helmet());
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://tantha-admin-production.up.railway.app",
+];
 
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow Postman, server-to-server requests, and allowed frontend origins
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+// CORS must be before routes
+app.use(cors(corsOptions));
+
+app.use(helmet());
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -70,7 +84,6 @@ app.use("/api/fanclub", fanClubRoutes);
 app.use("/api/premium", premiumRoutes);
 app.use("/api/admin", adminDashboardRoutes);
 app.use("/api/upload-test", uploadTestRoutes);
-
 
 app.use((req, res) => {
   res.status(404).json({
