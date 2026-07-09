@@ -1,5 +1,4 @@
 const express = require("express");
-const cors = require("cors");
 
 const authRoutes = require("./routes/authRoutes");
 const artistRoutes = require("./routes/artistRoutes");
@@ -28,57 +27,51 @@ const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://tantha-admin-production.up.railway.app",
-];
-
-// Manual CORS handler — must be before helmet, limiter, and routes
+/**
+ * FORCE CORS
+ * This must be before helmet, limiter, json parser, and all routes.
+ */
 app.use((req, res, next) => {
   const origin = req.headers.origin;
 
-  if (!origin || allowedOrigins.includes(origin)) {
-    if (origin) {
-      res.setHeader("Access-Control-Allow-Origin", origin);
-      res.setHeader("Vary", "Origin");
-    }
+  console.log(
+    "CORS CHECK:",
+    req.method,
+    req.originalUrl,
+    origin || "no-origin",
+  );
 
-    res.setHeader(
-      "Access-Control-Allow-Methods",
-      "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-    );
+  const allowedOrigins = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://tantha-admin-production.up.railway.app",
+  ];
 
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      req.headers["access-control-request-headers"] ||
-        "Content-Type, Authorization"
-    );
-
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(204);
-    }
-
-    return next();
+  if (origin && allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
   }
 
-  console.log("CORS blocked origin:", origin);
-  return res.status(403).json({
-    success: false,
-    message: `CORS blocked for origin: ${origin}`,
-  });
-});
+  if (!origin) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
 
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
+  res.setHeader("Vary", "Origin");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With",
+  );
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+
+  next();
+});
 
 app.use(helmet());
 
