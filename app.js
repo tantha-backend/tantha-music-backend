@@ -28,38 +28,57 @@ const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
-/**
- * CORS CONFIG
- * Allows local frontend and Railway production frontend.
- */
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "https://tantha-admin-production.up.railway.app",
 ];
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin like Postman, mobile apps, server-to-server
-    if (!origin) {
-      return callback(null, true);
+// Manual CORS handler — must be before helmet, limiter, and routes
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (!origin || allowedOrigins.includes(origin)) {
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
     }
 
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    );
+
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      req.headers["access-control-request-headers"] ||
+        "Content-Type, Authorization"
+    );
+
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
     }
 
-    console.log("CORS blocked origin:", origin);
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
+    return next();
+  }
 
-// CORS must come before helmet and before routes
-app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions));
+  console.log("CORS blocked origin:", origin);
+  return res.status(403).json({
+    success: false,
+    message: `CORS blocked for origin: ${origin}`,
+  });
+});
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 app.use(helmet());
 
