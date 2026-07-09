@@ -28,6 +28,10 @@ const app = express();
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
+/**
+ * CORS CONFIG
+ * Allows local frontend and Railway production frontend.
+ */
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -36,11 +40,16 @@ const allowedOrigins = [
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow Postman, server-to-server requests, and allowed frontend origins
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin like Postman, mobile apps, server-to-server
+    if (!origin) {
       return callback(null, true);
     }
 
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    console.log("CORS blocked origin:", origin);
     return callback(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,
@@ -48,8 +57,9 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
-// CORS must be before routes
+// CORS must come before helmet and before routes
 app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 app.use(helmet());
 
