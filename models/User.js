@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema(
       required: true,
       unique: true,
       lowercase: true,
+      trim: true,
     },
 
     password: {
@@ -26,9 +27,25 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
 
+    status: {
+      type: String,
+      enum: ["active", "suspended", "deactivated"],
+      default: "active",
+    },
+
+    profileImage: {
+      type: String,
+      default: "",
+    },
+
     isPremium: {
       type: Boolean,
       default: false,
+    },
+
+    premiumExpiresAt: {
+      type: Date,
+      default: null,
     },
 
     likedSongs: [
@@ -38,24 +55,14 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
-    isPremium: {
-  type: Boolean,
-  default: false,
-},
-
-premiumExpiresAt: {
-  type: Date,
-  default: null,
-},
-
     followingArtists: [
-  {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Artist",
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Artist",
+      },
+    ],
   },
-],
-  },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("User", userSchema);

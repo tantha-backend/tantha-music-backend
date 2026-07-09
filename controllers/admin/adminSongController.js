@@ -1,9 +1,27 @@
 const Song = require("../../models/Song");
 const Artist = require("../../models/Artist");
 
+const notificationController = require("../notificationController");
+
+const createNotification =
+  notificationController.createNotification || (async () => null);
+
+const getArtistDisplayName = (artist) => {
+  return (
+    artist?.stageName ||
+    artist?.artistName ||
+    artist?.name ||
+    artist?.email ||
+    "Unknown Artist"
+  );
+};
+
 const getAdminSongs = async (req, res) => {
   try {
-    const songs = await Song.find()
+    const songs = await Song.find({
+      status: "published",
+      isPublished: true,
+    })
       .populate("artistId", "stageName artistName name email")
       .sort({ createdAt: -1 });
 
@@ -14,6 +32,7 @@ const getAdminSongs = async (req, res) => {
     });
   } catch (error) {
     console.error("Get admin songs error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to fetch songs",
@@ -34,6 +53,7 @@ const getPendingSongs = async (req, res) => {
     });
   } catch (error) {
     console.error("Get pending songs error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to fetch pending songs",
@@ -60,7 +80,8 @@ const getAdminSongById = async (req, res) => {
       song,
     });
   } catch (error) {
-    console.error("Get admin song by ID error:", error);
+    console.error("Get admin song error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to fetch song",
@@ -83,14 +104,14 @@ const createAdminSong = async (req, res) => {
     if (!title || !duration || !genre || !language || !artistId) {
       return res.status(400).json({
         success: false,
-        message: "Title, duration, genre, language and artist are required",
+        message: "Title, duration, genre, language and artist are required.",
       });
     }
 
-    if (!req.files || !req.files.audio128 || !req.files.audio128[0]) {
+    if (!req.files?.audio128?.[0]) {
       return res.status(400).json({
         success: false,
-        message: "audio128 file is required",
+        message: "Audio128 file is required.",
       });
     }
 
@@ -99,7 +120,7 @@ const createAdminSong = async (req, res) => {
     if (!artist) {
       return res.status(404).json({
         success: false,
-        message: "Artist not found",
+        message: "Artist not found.",
       });
     }
 
@@ -114,19 +135,25 @@ const createAdminSong = async (req, res) => {
       ? req.files.cover[0].location || req.files.cover[0].path
       : "";
 
+    console.log("========== SONG UPLOAD ==========");
+    console.log("Audio128 :", audio128);
+    console.log("Audio320 :", audio320);
+    console.log("Cover    :", coverImage);
+    console.log("=================================");
+
     const song = await Song.create({
       title,
-      duration,
+      duration: Number(duration),
       genre,
       language,
       lyrics: lyrics || "",
-      isPremiumOnly: isPremiumOnly === "true" || isPremiumOnly === true,
       artistId,
       audio128,
       audio320,
       coverImage,
-      status: "published",
-      isPublished: true,
+      isPremiumOnly: isPremiumOnly === true || isPremiumOnly === "true",
+      status: "pending",
+      isPublished: false,
     });
 
     const populatedSong = await Song.findById(song._id).populate(
@@ -134,16 +161,29 @@ const createAdminSong = async (req, res) => {
       "stageName artistName name email",
     );
 
+    await createNotification({
+      userId: null,
+      title: "New song uploaded",
+      message: `${title} by ${getArtistDisplayName(
+        populatedSong?.artistId || artist,
+      )} is waiting for approval.`,
+      type: "song",
+      targetType: "song",
+      targetId: song._id,
+      link: "/approvals",
+    });
+
     res.status(201).json({
       success: true,
-      message: "Song created successfully",
+      message: "Song uploaded successfully.",
       song: populatedSong,
     });
   } catch (error) {
     console.error("Create admin song error:", error);
+
     res.status(500).json({
       success: false,
-      message: "Failed to create song",
+      message: error.message,
     });
   }
 };
@@ -155,56 +195,90 @@ const approveSong = async (req, res) => {
     if (!song) {
       return res.status(404).json({
         success: false,
-        message: "Song not found",
+        message: "Song not found.",
       });
     }
 
     song.status = "published";
     song.isPublished = true;
+
     await song.save();
+
+    const populatedSong = await Song.findById(song._id).populate(
+      "artistId",
+      "stageName artistName name email",
+    );
+
+    await createNotification({
+      userId: null,
+      title: "Song approved",
+      message: `${populatedSong.title} by ${getArtistDisplayName(
+        populatedSong.artistId,
+      )} has been approved and published.`,
+      type: "song",
+      targetType: "song",
+      targetId: populatedSong._id,
+      link: "/songs",
+    });
 
     res.status(200).json({
       success: true,
-      message: "Song approved successfully",
-      song,
+      message: "Song approved successfully.",
+      song: populatedSong,
     });
   } catch (error) {
     console.error("Approve song error:", error);
+
     res.status(500).json({
       success: false,
-      message: "Failed to approve song",
+      message: "Failed to approve song.",
     });
   }
 };
 
 const rejectSong = async (req, res) => {
   try {
-    const { reason } = req.body;
-
-    const song = await Song.findById(req.params.id);
+    const song = await Song.findById(req.params.id).populate(
+      "artistId",
+      "stageName artistName name email",
+    );
 
     if (!song) {
       return res.status(404).json({
         success: false,
-        message: "Song not found",
+        message: "Song not found.",
       });
     }
 
     song.status = "rejected";
     song.isPublished = false;
-    song.rejectionReason = reason || "No reason provided";
+    song.rejectionReason = req.body.reason || "Rejected by administrator.";
+
     await song.save();
+
+    await createNotification({
+      userId: null,
+      title: "Song rejected",
+      message: `${song.title} by ${getArtistDisplayName(
+        song.artistId,
+      )} was rejected.`,
+      type: "song",
+      targetType: "song",
+      targetId: song._id,
+      link: "/approvals",
+    });
 
     res.status(200).json({
       success: true,
-      message: "Song rejected successfully",
+      message: "Song rejected successfully.",
       song,
     });
   } catch (error) {
     console.error("Reject song error:", error);
+
     res.status(500).json({
       success: false,
-      message: "Failed to reject song",
+      message: "Failed to reject song.",
     });
   }
 };
@@ -216,7 +290,7 @@ const deleteSong = async (req, res) => {
     if (!song) {
       return res.status(404).json({
         success: false,
-        message: "Song not found",
+        message: "Song not found.",
       });
     }
 
@@ -224,13 +298,14 @@ const deleteSong = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Song deleted successfully",
+      message: "Song deleted successfully.",
     });
   } catch (error) {
     console.error("Delete song error:", error);
+
     res.status(500).json({
       success: false,
-      message: "Failed to delete song",
+      message: "Failed to delete song.",
     });
   }
 };

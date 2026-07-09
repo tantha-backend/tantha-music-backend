@@ -82,6 +82,7 @@ const {
 } = require("../controllers/admin/analyticsController");
 
 const {
+  getMonetizationDashboard,
   getRevenueOverview,
   getPremiumSubscriptions,
   getPremiumSubscriptionById,
@@ -121,10 +122,11 @@ router.use(adminMiddleware);
 router.get("/dashboard", getAdminDashboard);
 
 // Users
+// Users
 router.get("/users", getAdminUsers);
 router.get("/users/available-artists", getAvailableArtistUsers);
-router.get("/users/:id", getAdminUserById);
 router.post("/users/create", createAdminUser);
+router.get("/users/:id", getAdminUserById);
 router.put("/users/:id", updateAdminUser);
 router.delete("/users/:id", deleteAdminUser);
 router.put("/users/:id/role", updateUserRole);
@@ -166,13 +168,21 @@ router.get("/albums/:id", getAdminAlbumById);
 
 router.post(
   "/albums/create",
-  upload.fields([{ name: "cover", maxCount: 1 }]),
+  upload.fields([
+    { name: "cover", maxCount: 1 },
+    { name: "coverImage", maxCount: 1 },
+    { name: "bannerImage", maxCount: 1 },
+  ]),
   createAdminAlbum,
 );
 
 router.put(
   "/albums/:id",
-  upload.fields([{ name: "cover", maxCount: 1 }]),
+  upload.fields([
+    { name: "cover", maxCount: 1 },
+    { name: "coverImage", maxCount: 1 },
+    { name: "bannerImage", maxCount: 1 },
+  ]),
   updateAdminAlbum,
 );
 
@@ -238,6 +248,7 @@ router.get("/monetization/fanclub/:id", getFanClubSubscriptionById);
 
 router.get("/monetization/artists", getArtistEarnings);
 router.get("/monetization/artists/top", getTopEarningArtists);
+router.get("/monetization", getMonetizationDashboard);
 
 // Settings
 router.get("/settings", getSettings);

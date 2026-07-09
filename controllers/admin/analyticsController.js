@@ -4,102 +4,47 @@ const Song = require("../../models/Song");
 const Album = require("../../models/Album");
 const Playlist = require("../../models/Playlist");
 
-const getDateRange = (range = "30d") => {
-  const endDate = new Date();
-  const startDate = new Date();
-
-  switch (range) {
-    case "7d":
-      startDate.setDate(endDate.getDate() - 7);
-      break;
-    case "90d":
-      startDate.setDate(endDate.getDate() - 90);
-      break;
-    case "1y":
-      startDate.setFullYear(endDate.getFullYear() - 1);
-      break;
-    case "all":
-      return {};
-    case "30d":
-    default:
-      startDate.setDate(endDate.getDate() - 30);
-      break;
-  }
-
-  return {
-    createdAt: {
-      $gte: startDate,
-      $lte: endDate,
-    },
-  };
-};
-
-const getGrowthPercentage = (current, previous) => {
-  if (!previous || previous === 0) {
-    return current > 0 ? 100 : 0;
-  }
-
-  return Number((((current - previous) / previous) * 100).toFixed(2));
-};
-
-const getPreviousRange = (range = "30d") => {
-  const now = new Date();
-  const currentStart = new Date();
-
-  switch (range) {
-    case "7d":
-      currentStart.setDate(now.getDate() - 7);
-      break;
-    case "90d":
-      currentStart.setDate(now.getDate() - 90);
-      break;
-    case "1y":
-      currentStart.setFullYear(now.getFullYear() - 1);
-      break;
-    case "30d":
-    default:
-      currentStart.setDate(now.getDate() - 30);
-      break;
-  }
-
-  const previousEnd = new Date(currentStart);
-  const previousStart = new Date(currentStart);
-
-  switch (range) {
-    case "7d":
-      previousStart.setDate(previousStart.getDate() - 7);
-      break;
-    case "90d":
-      previousStart.setDate(previousStart.getDate() - 90);
-      break;
-    case "1y":
-      previousStart.setFullYear(previousStart.getFullYear() - 1);
-      break;
-    case "30d":
-    default:
-      previousStart.setDate(previousStart.getDate() - 30);
-      break;
-  }
-
-  return {
-    createdAt: {
-      $gte: previousStart,
-      $lt: previousEnd,
-    },
-  };
-};
-
-const getStartDateForChart = (days = 30) => {
+const getStartDate = (days = 30) => {
   const date = new Date();
-  date.setDate(date.getDate() - days);
+  date.setDate(date.getDate() - Number(days || 30));
   date.setHours(0, 0, 0, 0);
   return date;
 };
 
-const buildDailyChart = async (Model, days = 30, extraMatch = {}) => {
-  const startDate = getStartDateForChart(days);
+const formatDateKey = (date) => {
+  return date.toISOString().slice(0, 10);
+};
 
-  const data = await Model.aggregate([
+const buildEmptyDailySeries = (days = 30) => {
+  const result = [];
+  const today = new Date();
+
+  for (let i = Number(days || 30) - 1; i >= 0; i -= 1) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - i);
+    date.setHours(0, 0, 0, 0);
+
+    result.push({
+      date: formatDateKey(date),
+      label: date.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+      }),
+      value: 0,
+      count: 0,
+      streams: 0,
+      revenue: 0,
+    });
+  }
+
+  return result;
+};
+
+const buildDailyCreatedChart = async (Model, days = 30, extraMatch = {}) => {
+  const startDate = getStartDate(days);
+  const base = buildEmptyDailySeries(days);
+
+  const rows = await Model.aggregate([
     {
       $match: {
         createdAt: { $gte: startDate },
@@ -116,169 +61,199 @@ const buildDailyChart = async (Model, days = 30, extraMatch = {}) => {
         count: { $sum: 1 },
       },
     },
+  ]);
+
+  const map = new Map();
+
+  rows.forEach((item) => {
+    const key = `${item._id.year}-${String(item._id.month).padStart(
+      2,
+      "0",
+    )}-${String(item._id.day).padStart(2, "0")}`;
+
+    map.set(key, item.count);
+  });
+
+  return base.map((item) => {
+    const count = map.get(item.date) || 0;
+
+    return {
+      ...item,
+      value: count,
+      count,
+    };
+  });
+};
+
+const buildMonthlyCreatedChart = async () => {
+  const startDate = new Date();
+  startDate.setMonth(startDate.getMonth() - 11);
+  startDate.setDate(1);
+  startDate.setHours(0, 0, 0, 0);
+
+  const rows = await Song.aggregate([
+    {
+      $match: {
+        createdAt: { $gte: startDate },
+      },
+    },
+    {
+      $group: {
+        _id: {
+          year: { $year: "$createdAt" },
+          month: { $month: "$createdAt" },
+        },
+        count: { $sum: 1 },
+        streams: { $sum: { $ifNull: ["$playCount", 0] } },
+      },
+    },
     {
       $sort: {
         "_id.year": 1,
         "_id.month": 1,
-        "_id.day": 1,
       },
     },
   ]);
 
-  return data.map((item) => ({
-    date: `${item._id.year}-${String(item._id.month).padStart(2, "0")}-${String(
-      item._id.day,
-    ).padStart(2, "0")}`,
-    count: item.count,
-  }));
+  const map = new Map();
+
+  rows.forEach((item) => {
+    const key = `${item._id.year}-${String(item._id.month).padStart(2, "0")}`;
+    map.set(key, item);
+  });
+
+  const result = [];
+  const today = new Date();
+
+  for (let i = 11; i >= 0; i -= 1) {
+    const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+      2,
+      "0",
+    )}`;
+
+    const found = map.get(key);
+
+    result.push({
+      date: key,
+      label: date.toLocaleDateString("en-IN", {
+        month: "short",
+        year: "2-digit",
+      }),
+      value: found?.count || 0,
+      count: found?.count || 0,
+      streams: found?.streams || 0,
+      revenue: 0,
+    });
+  }
+
+  return result;
 };
+
+const getArtistDisplayName = (artist) => {
+  return (
+    artist?.stageName || artist?.artistName || artist?.name || "Unknown Artist"
+  );
+};
+
+const normalizeSong = (song) => {
+  const obj = song.toObject ? song.toObject() : song;
+
+  return {
+    ...obj,
+    artistName: getArtistDisplayName(obj.artistId || obj.artist),
+    artist: obj.artistId || obj.artist,
+    streams: obj.playCount || 0,
+    likes: obj.likeCount || 0,
+    revenue: obj.revenue || 0,
+  };
+};
+
+const normalizeArtist = async (artist) => {
+  const obj = artist.toObject ? artist.toObject() : artist;
+
+  const [songsCount, streamsResult] = await Promise.all([
+    Song.countDocuments({ artistId: obj._id }),
+    Song.aggregate([
+      {
+        $match: {
+          artistId: obj._id,
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          streams: { $sum: { $ifNull: ["$playCount", 0] } },
+          revenue: { $sum: { $ifNull: ["$revenue", 0] } },
+        },
+      },
+    ]),
+  ]);
+
+  return {
+    ...obj,
+    name: getArtistDisplayName(obj),
+    songs: songsCount,
+    songsCount,
+    followers: obj.followersCount || 0,
+    followersCount: obj.followersCount || 0,
+    streams: streamsResult[0]?.streams || 0,
+    revenue: streamsResult[0]?.revenue || 0,
+  };
+};
+
 const getDashboardOverview = async (req, res) => {
   try {
-    const range = req.query.range || "30d";
-
-    const currentFilter = getDateRange(range);
-    const previousFilter = getPreviousRange(range);
-
     const [
       totalUsers,
       totalArtists,
       totalSongs,
       totalAlbums,
       totalPlaylists,
-
       premiumUsers,
       publishedSongs,
       pendingSongs,
-
-      featuredArtists,
-      featuredPlaylists,
-
-      currentUsers,
-      previousUsers,
-
-      currentArtists,
-      previousArtists,
-
-      currentSongs,
-      previousSongs,
-
-      currentAlbums,
-      previousAlbums,
-
-      currentPlaylists,
-      previousPlaylists,
+      totalStreamsResult,
     ] = await Promise.all([
       User.countDocuments(),
-
       Artist.countDocuments(),
-
       Song.countDocuments(),
-
       Album.countDocuments(),
-
       Playlist.countDocuments(),
-
-      User.countDocuments({
-        isPremium: true,
-      }),
-
-      Song.countDocuments({
-        isPublished: true,
-      }),
-
-      Song.countDocuments({
-        isPublished: false,
-      }),
-
-      Artist.countDocuments({
-        isFeatured: true,
-      }),
-
-      Playlist.countDocuments({
-        isFeatured: true,
-      }),
-
-      User.countDocuments(currentFilter),
-
-      User.countDocuments(previousFilter),
-
-      Artist.countDocuments(currentFilter),
-
-      Artist.countDocuments(previousFilter),
-
-      Song.countDocuments(currentFilter),
-
-      Song.countDocuments(previousFilter),
-
-      Album.countDocuments(currentFilter),
-
-      Album.countDocuments(previousFilter),
-
-      Playlist.countDocuments(currentFilter),
-
-      Playlist.countDocuments(previousFilter),
+      User.countDocuments({ isPremium: true }),
+      Song.countDocuments({ isPublished: true }),
+      Song.countDocuments({ isPublished: false }),
+      Song.aggregate([
+        {
+          $group: {
+            _id: null,
+            total: { $sum: { $ifNull: ["$playCount", 0] } },
+          },
+        },
+      ]),
     ]);
 
-    const overview = {
-      totals: {
+    res.status(200).json({
+      success: true,
+      overview: {
+        totalUsers,
+        totalArtists,
+        totalSongs,
+        totalAlbums,
+        totalPlaylists,
+        premiumUsers,
+        publishedSongs,
+        pendingSongs,
+        totalStreams: totalStreamsResult[0]?.total || 0,
+        activeUsers: totalUsers,
+        monthlyListeners: totalUsers,
+        revenue: 0,
         users: totalUsers,
         artists: totalArtists,
         songs: totalSongs,
         albums: totalAlbums,
         playlists: totalPlaylists,
       },
-
-      content: {
-        publishedSongs,
-        pendingSongs,
-        featuredArtists,
-        featuredPlaylists,
-      },
-
-      premium: {
-        premiumUsers,
-        premiumPercentage:
-          totalUsers === 0
-            ? 0
-            : Number(((premiumUsers / totalUsers) * 100).toFixed(2)),
-      },
-
-      growth: {
-        users: {
-          current: currentUsers,
-          previous: previousUsers,
-          percentage: getGrowthPercentage(currentUsers, previousUsers),
-        },
-
-        artists: {
-          current: currentArtists,
-          previous: previousArtists,
-          percentage: getGrowthPercentage(currentArtists, previousArtists),
-        },
-
-        songs: {
-          current: currentSongs,
-          previous: previousSongs,
-          percentage: getGrowthPercentage(currentSongs, previousSongs),
-        },
-
-        albums: {
-          current: currentAlbums,
-          previous: previousAlbums,
-          percentage: getGrowthPercentage(currentAlbums, previousAlbums),
-        },
-
-        playlists: {
-          current: currentPlaylists,
-          previous: previousPlaylists,
-          percentage: getGrowthPercentage(currentPlaylists, previousPlaylists),
-        },
-      },
-    };
-
-    res.status(200).json({
-      success: true,
-      overview,
     });
   } catch (error) {
     console.error("Dashboard overview error:", error);
@@ -295,23 +270,36 @@ const getDashboardCharts = async (req, res) => {
   try {
     const days = Number(req.query.days) || 30;
 
-    const [userChart, artistChart, songChart, albumChart, playlistChart] =
+    const [users, artists, songs, albums, playlists, monthly] =
       await Promise.all([
-        buildDailyChart(User, days),
-        buildDailyChart(Artist, days),
-        buildDailyChart(Song, days),
-        buildDailyChart(Album, days),
-        buildDailyChart(Playlist, days),
+        buildDailyCreatedChart(User, days),
+        buildDailyCreatedChart(Artist, days),
+        buildDailyCreatedChart(Song, days),
+        buildDailyCreatedChart(Album, days),
+        buildDailyCreatedChart(Playlist, days),
+        buildMonthlyCreatedChart(),
       ]);
+
+    const streams = songs.map((item) => ({
+      ...item,
+      streams: item.value,
+    }));
 
     res.status(200).json({
       success: true,
       charts: {
-        users: userChart,
-        artists: artistChart,
-        songs: songChart,
-        albums: albumChart,
-        playlists: playlistChart,
+        users,
+        artists,
+        songs,
+        albums,
+        playlists,
+        streams,
+        streamChart: streams,
+        dailyStreams: streams,
+        timeline: streams,
+        monthly,
+        monthlyChart: monthly,
+        performance: monthly,
       },
     });
   } catch (error) {
@@ -328,94 +316,53 @@ const getDashboardCharts = async (req, res) => {
 const getPlatformStatistics = async (req, res) => {
   try {
     const [
-      totalSongPlays,
-      totalPlaylistFollowers,
-      totalPlaylistPlays,
-      totalAlbumPlays,
-      totalSongLikes,
-      totalAlbumLikes,
+      totalUsers,
+      totalSongs,
+      totalArtists,
+      totalStreamsResult,
+      totalLikesResult,
     ] = await Promise.all([
+      User.countDocuments(),
+      Song.countDocuments(),
+      Artist.countDocuments(),
       Song.aggregate([
         {
           $group: {
             _id: null,
-            total: {
-              $sum: "$playCount",
-            },
+            total: { $sum: { $ifNull: ["$playCount", 0] } },
           },
         },
       ]),
-
-      Playlist.aggregate([
-        {
-          $group: {
-            _id: null,
-            total: {
-              $sum: "$followerCount",
-            },
-          },
-        },
-      ]),
-
-      Playlist.aggregate([
-        {
-          $group: {
-            _id: null,
-            total: {
-              $sum: "$playCount",
-            },
-          },
-        },
-      ]),
-
-      Album.aggregate([
-        {
-          $group: {
-            _id: null,
-            total: {
-              $sum: "$totalPlays",
-            },
-          },
-        },
-      ]),
-
       Song.aggregate([
         {
           $group: {
             _id: null,
-            total: {
-              $sum: "$likeCount",
-            },
-          },
-        },
-      ]),
-
-      Album.aggregate([
-        {
-          $group: {
-            _id: null,
-            total: {
-              $sum: "$likeCount",
-            },
+            total: { $sum: { $ifNull: ["$likeCount", 0] } },
           },
         },
       ]),
     ]);
 
+    const totalStreams = totalStreamsResult[0]?.total || 0;
+
     res.status(200).json({
       success: true,
+      platform: {
+        totalUsers,
+        totalSongs,
+        totalArtists,
+        totalStreams,
+        totalSongPlays: totalStreams,
+        totalSongLikes: totalLikesResult[0]?.total || 0,
+        activeUsers: totalUsers,
+      },
       statistics: {
-        totalSongPlays: totalSongPlays[0]?.total || 0,
-
-        totalAlbumPlays: totalAlbumPlays[0]?.total || 0,
-
-        totalPlaylistPlays: totalPlaylistPlays[0]?.total || 0,
-
-        totalSongLikes: totalSongLikes[0]?.total || 0,
-
-        totalAlbumLikes: totalAlbumLikes[0]?.total || 0,
-
-        totalPlaylistFollowers: totalPlaylistFollowers[0]?.total || 0,
+        totalUsers,
+        totalSongs,
+        totalArtists,
+        totalStreams,
+        totalSongPlays: totalStreams,
+        totalSongLikes: totalLikesResult[0]?.total || 0,
       },
     });
   } catch (error) {
@@ -428,13 +375,14 @@ const getPlatformStatistics = async (req, res) => {
     });
   }
 };
+
 const getTopContentAnalytics = async (req, res) => {
   try {
     const limit = Math.max(Number(req.query.limit) || 10, 1);
 
-    const [topSongs, topArtists, topAlbums, topPlaylists] = await Promise.all([
+    const [songs, artistsRaw, albums, playlists] = await Promise.all([
       Song.find()
-        .populate("artistId", "stageName artistName profileImage")
+        .populate("artistId", "stageName artistName name profileImage")
         .sort({ playCount: -1, likeCount: -1, createdAt: -1 })
         .limit(limit),
 
@@ -443,7 +391,7 @@ const getTopContentAnalytics = async (req, res) => {
         .limit(limit),
 
       Album.find()
-        .populate("artistId", "stageName artistName profileImage")
+        .populate("artistId", "stageName artistName name profileImage")
         .sort({ totalPlays: -1, likeCount: -1, createdAt: -1 })
         .limit(limit),
 
@@ -453,13 +401,17 @@ const getTopContentAnalytics = async (req, res) => {
         .limit(limit),
     ]);
 
+    const artists = await Promise.all(artistsRaw.map(normalizeArtist));
+
     res.status(200).json({
       success: true,
       topContent: {
-        songs: topSongs,
-        artists: topArtists,
-        albums: topAlbums,
-        playlists: topPlaylists,
+        songs: songs.map(normalizeSong),
+        topSongs: songs.map(normalizeSong),
+        artists,
+        topArtists: artists,
+        albums,
+        playlists,
       },
     });
   } catch (error) {
@@ -475,86 +427,43 @@ const getTopContentAnalytics = async (req, res) => {
 
 const getGenreAnalytics = async (req, res) => {
   try {
-    const [songGenres, albumGenres] = await Promise.all([
-      Song.aggregate([
-        {
-          $match: {
-            genre: {
-              $exists: true,
-              $ne: "",
-            },
-          },
+    const songGenres = await Song.aggregate([
+      {
+        $match: {
+          genre: { $exists: true, $ne: "" },
         },
-        {
-          $group: {
-            _id: "$genre",
-            count: {
-              $sum: 1,
-            },
-            totalPlays: {
-              $sum: "$playCount",
-            },
-            totalLikes: {
-              $sum: "$likeCount",
-            },
-          },
+      },
+      {
+        $group: {
+          _id: "$genre",
+          count: { $sum: 1 },
+          value: { $sum: 1 },
+          totalPlays: { $sum: { $ifNull: ["$playCount", 0] } },
+          totalLikes: { $sum: { $ifNull: ["$likeCount", 0] } },
         },
-        {
-          $sort: {
-            count: -1,
-            totalPlays: -1,
-          },
+      },
+      {
+        $sort: {
+          count: -1,
+          totalPlays: -1,
         },
-      ]),
-
-      Album.aggregate([
-        {
-          $match: {
-            genre: {
-              $exists: true,
-              $ne: "",
-            },
-          },
-        },
-        {
-          $group: {
-            _id: "$genre",
-            count: {
-              $sum: 1,
-            },
-            totalPlays: {
-              $sum: "$totalPlays",
-            },
-            totalLikes: {
-              $sum: "$likeCount",
-            },
-          },
-        },
-        {
-          $sort: {
-            count: -1,
-            totalPlays: -1,
-          },
-        },
-      ]),
+      },
     ]);
+
+    const genres = songGenres.map((item) => ({
+      name: item._id || "Unknown",
+      genre: item._id || "Unknown",
+      label: item._id || "Unknown",
+      value: item.value || item.count || 0,
+      count: item.count || 0,
+      totalPlays: item.totalPlays || 0,
+      totalLikes: item.totalLikes || 0,
+    }));
 
     res.status(200).json({
       success: true,
-      genres: {
-        songs: songGenres.map((genre) => ({
-          genre: genre._id,
-          count: genre.count,
-          totalPlays: genre.totalPlays || 0,
-          totalLikes: genre.totalLikes || 0,
-        })),
-        albums: albumGenres.map((genre) => ({
-          genre: genre._id,
-          count: genre.count,
-          totalPlays: genre.totalPlays || 0,
-          totalLikes: genre.totalLikes || 0,
-        })),
-      },
+      genres,
+      genreDistribution: genres,
     });
   } catch (error) {
     console.error("Genre analytics error:", error);
@@ -569,86 +478,43 @@ const getGenreAnalytics = async (req, res) => {
 
 const getLanguageAnalytics = async (req, res) => {
   try {
-    const [songLanguages, albumLanguages] = await Promise.all([
-      Song.aggregate([
-        {
-          $match: {
-            language: {
-              $exists: true,
-              $ne: "",
-            },
-          },
+    const songLanguages = await Song.aggregate([
+      {
+        $match: {
+          language: { $exists: true, $ne: "" },
         },
-        {
-          $group: {
-            _id: "$language",
-            count: {
-              $sum: 1,
-            },
-            totalPlays: {
-              $sum: "$playCount",
-            },
-            totalLikes: {
-              $sum: "$likeCount",
-            },
-          },
+      },
+      {
+        $group: {
+          _id: "$language",
+          count: { $sum: 1 },
+          value: { $sum: 1 },
+          totalPlays: { $sum: { $ifNull: ["$playCount", 0] } },
+          totalLikes: { $sum: { $ifNull: ["$likeCount", 0] } },
         },
-        {
-          $sort: {
-            count: -1,
-            totalPlays: -1,
-          },
+      },
+      {
+        $sort: {
+          count: -1,
+          totalPlays: -1,
         },
-      ]),
-
-      Album.aggregate([
-        {
-          $match: {
-            language: {
-              $exists: true,
-              $ne: "",
-            },
-          },
-        },
-        {
-          $group: {
-            _id: "$language",
-            count: {
-              $sum: 1,
-            },
-            totalPlays: {
-              $sum: "$totalPlays",
-            },
-            totalLikes: {
-              $sum: "$likeCount",
-            },
-          },
-        },
-        {
-          $sort: {
-            count: -1,
-            totalPlays: -1,
-          },
-        },
-      ]),
+      },
     ]);
+
+    const languages = songLanguages.map((item) => ({
+      name: item._id || "Unknown",
+      language: item._id || "Unknown",
+      label: item._id || "Unknown",
+      value: item.value || item.count || 0,
+      count: item.count || 0,
+      totalPlays: item.totalPlays || 0,
+      totalLikes: item.totalLikes || 0,
+    }));
 
     res.status(200).json({
       success: true,
-      languages: {
-        songs: songLanguages.map((language) => ({
-          language: language._id,
-          count: language.count,
-          totalPlays: language.totalPlays || 0,
-          totalLikes: language.totalLikes || 0,
-        })),
-        albums: albumLanguages.map((language) => ({
-          language: language._id,
-          count: language.count,
-          totalPlays: language.totalPlays || 0,
-          totalLikes: language.totalLikes || 0,
-        })),
-      },
+      languages,
+      languageDistribution: languages,
     });
   } catch (error) {
     console.error("Language analytics error:", error);
@@ -660,16 +526,17 @@ const getLanguageAnalytics = async (req, res) => {
     });
   }
 };
+
 const getGrowthAnalytics = async (req, res) => {
   try {
     const days = Number(req.query.days) || 30;
 
     const [users, artists, songs, albums, playlists] = await Promise.all([
-      buildDailyChart(User, days),
-      buildDailyChart(Artist, days),
-      buildDailyChart(Song, days),
-      buildDailyChart(Album, days),
-      buildDailyChart(Playlist, days),
+      buildDailyCreatedChart(User, days),
+      buildDailyCreatedChart(Artist, days),
+      buildDailyCreatedChart(Song, days),
+      buildDailyCreatedChart(Album, days),
+      buildDailyCreatedChart(Playlist, days),
     ]);
 
     res.status(200).json({
@@ -680,6 +547,11 @@ const getGrowthAnalytics = async (req, res) => {
         songs,
         albums,
         playlists,
+        streams: songs,
+        chart: songs,
+        timeline: songs,
+        monthly: await buildMonthlyCreatedChart(),
+        performance: await buildMonthlyCreatedChart(),
       },
     });
   } catch (error) {
@@ -701,14 +573,7 @@ const getContentStatusAnalytics = async (req, res) => {
           {
             $group: {
               _id: "$status",
-              count: {
-                $sum: 1,
-              },
-            },
-          },
-          {
-            $sort: {
-              count: -1,
+              count: { $sum: 1 },
             },
           },
         ]),
@@ -717,14 +582,7 @@ const getContentStatusAnalytics = async (req, res) => {
           {
             $group: {
               _id: "$status",
-              count: {
-                $sum: 1,
-              },
-            },
-          },
-          {
-            $sort: {
-              count: -1,
+              count: { $sum: 1 },
             },
           },
         ]),
@@ -733,9 +591,7 @@ const getContentStatusAnalytics = async (req, res) => {
           {
             $group: {
               _id: "$isPublic",
-              count: {
-                $sum: 1,
-              },
+              count: { $sum: 1 },
             },
           },
         ]),
@@ -744,14 +600,7 @@ const getContentStatusAnalytics = async (req, res) => {
           {
             $group: {
               _id: "$role",
-              count: {
-                $sum: 1,
-              },
-            },
-          },
-          {
-            $sort: {
-              count: -1,
+              count: { $sum: 1 },
             },
           },
         ]),
@@ -759,34 +608,25 @@ const getContentStatusAnalytics = async (req, res) => {
 
     res.status(200).json({
       success: true,
+      status: {
+        songs: songStatus,
+        albums: albumStatus,
+        playlists: playlistVisibility,
+        users: userRoles,
+      },
       statusAnalytics: {
-        songs: songStatus.map((item) => ({
-          status: item._id || "unknown",
-          count: item.count,
-        })),
-
-        albums: albumStatus.map((item) => ({
-          status: item._id || "unknown",
-          count: item.count,
-        })),
-
-        playlists: playlistVisibility.map((item) => ({
-          visibility: item._id ? "public" : "private",
-          count: item.count,
-        })),
-
-        users: userRoles.map((item) => ({
-          role: item._id || "unknown",
-          count: item.count,
-        })),
+        songs: songStatus,
+        albums: albumStatus,
+        playlists: playlistVisibility,
+        users: userRoles,
       },
     });
   } catch (error) {
-    console.error("Content status analytics error:", error);
+    console.error("Status analytics error:", error);
 
     res.status(500).json({
       success: false,
-      message: "Failed to fetch content status analytics",
+      message: "Failed to fetch status analytics",
       error: error.message,
     });
   }
@@ -794,34 +634,16 @@ const getContentStatusAnalytics = async (req, res) => {
 
 const getRevenueAnalytics = async (req, res) => {
   try {
-    const [albumRevenue] = await Promise.all([
-      Album.aggregate([
-        {
-          $group: {
-            _id: null,
-            totalRevenue: {
-              $sum: "$revenue",
-            },
-            averageRevenue: {
-              $avg: "$revenue",
-            },
-          },
-        },
-      ]),
-    ]);
-
-    const totalAlbumRevenue = albumRevenue[0]?.totalRevenue || 0;
-    const averageAlbumRevenue = albumRevenue[0]?.averageRevenue || 0;
-
     res.status(200).json({
       success: true,
       revenue: {
-        totalRevenue: totalAlbumRevenue,
-        averageAlbumRevenue: Number(averageAlbumRevenue.toFixed(2)),
+        totalRevenue: 0,
+        revenue: 0,
+        amount: 0,
         premiumRevenue: 0,
         coffeeRevenue: 0,
         fanClubRevenue: 0,
-        platformRevenue: totalAlbumRevenue,
+        platformRevenue: 0,
       },
     });
   } catch (error) {
@@ -839,48 +661,78 @@ const getRecentActivityAnalytics = async (req, res) => {
   try {
     const limit = Math.max(Number(req.query.limit) || 10, 1);
 
-    const [
-      recentUsers,
-      recentArtists,
-      recentSongs,
-      recentAlbums,
-      recentPlaylists,
-    ] = await Promise.all([
+    const [users, artists, songs, albums, playlists] = await Promise.all([
       User.find()
-        .select("name email role isPremium createdAt")
+        .select("name email role createdAt")
         .sort({ createdAt: -1 })
         .limit(limit),
-
       Artist.find()
-        .select("stageName artistName profileImage createdAt")
+        .select("stageName artistName name createdAt")
         .sort({ createdAt: -1 })
         .limit(limit),
-
       Song.find()
-        .populate("artistId", "stageName artistName profileImage")
+        .populate("artistId", "stageName artistName name")
         .sort({ createdAt: -1 })
         .limit(limit),
-
       Album.find()
-        .populate("artistId", "stageName artistName profileImage")
+        .populate("artistId", "stageName artistName name")
         .sort({ createdAt: -1 })
         .limit(limit),
-
       Playlist.find()
-        .populate("userId", "name email role profileImage")
+        .populate("userId", "name email")
         .sort({ createdAt: -1 })
         .limit(limit),
     ]);
 
+    const activities = [
+      ...users.map((item) => ({
+        id: item._id,
+        type: "user",
+        title: item.name || item.email || "New user",
+        description: "User registered",
+        createdAt: item.createdAt,
+      })),
+
+      ...artists.map((item) => ({
+        id: item._id,
+        type: "artist",
+        title: getArtistDisplayName(item),
+        description: "Artist profile created",
+        createdAt: item.createdAt,
+      })),
+
+      ...songs.map((item) => ({
+        id: item._id,
+        type: "song",
+        title: item.title || "New song",
+        description: `Song uploaded by ${getArtistDisplayName(item.artistId)}`,
+        createdAt: item.createdAt,
+      })),
+
+      ...albums.map((item) => ({
+        id: item._id,
+        type: "album",
+        title: item.title || "New album",
+        description: `Album created by ${getArtistDisplayName(item.artistId)}`,
+        createdAt: item.createdAt,
+      })),
+
+      ...playlists.map((item) => ({
+        id: item._id,
+        type: "playlist",
+        title: item.title || "New playlist",
+        description: `Playlist created by ${item.userId?.name || "Admin"}`,
+        createdAt: item.createdAt,
+      })),
+    ]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, limit);
+
     res.status(200).json({
       success: true,
-      recent: {
-        users: recentUsers,
-        artists: recentArtists,
-        songs: recentSongs,
-        albums: recentAlbums,
-        playlists: recentPlaylists,
-      },
+      activities,
+      recentActivity: activities,
+      recent: activities,
     });
   } catch (error) {
     console.error("Recent activity analytics error:", error);
@@ -892,119 +744,57 @@ const getRecentActivityAnalytics = async (req, res) => {
     });
   }
 };
+
 const getFullAnalyticsDashboard = async (req, res) => {
   try {
     const days = Number(req.query.days) || 30;
-    const range = req.query.range || "30d";
-
-    const currentFilter = getDateRange(range);
-    const previousFilter = getPreviousRange(range);
 
     const [
-      totalUsers,
-      totalArtists,
-      totalSongs,
-      totalAlbums,
-      totalPlaylists,
-      premiumUsers,
-      publishedSongs,
-      pendingSongs,
-      featuredPlaylists,
-      currentUsers,
-      previousUsers,
-      currentSongs,
-      previousSongs,
-      userGrowthChart,
-      songGrowthChart,
-      albumGrowthChart,
-      playlistGrowthChart,
-      topSongs,
-      topArtists,
-      topAlbums,
-      topPlaylists,
+      overviewRes,
+      chartsRes,
+      topContentRes,
+      genresRes,
+      languagesRes,
+      recentRes,
     ] = await Promise.all([
-      User.countDocuments(),
-      Artist.countDocuments(),
-      Song.countDocuments(),
-      Album.countDocuments(),
-      Playlist.countDocuments(),
-
-      User.countDocuments({ isPremium: true }),
-      Song.countDocuments({ isPublished: true }),
-      Song.countDocuments({ isPublished: false }),
-      Playlist.countDocuments({ isFeatured: true }),
-
-      User.countDocuments(currentFilter),
-      User.countDocuments(previousFilter),
-      Song.countDocuments(currentFilter),
-      Song.countDocuments(previousFilter),
-
-      buildDailyChart(User, days),
-      buildDailyChart(Song, days),
-      buildDailyChart(Album, days),
-      buildDailyChart(Playlist, days),
-
-      Song.find()
-        .populate("artistId", "stageName artistName profileImage")
-        .sort({ playCount: -1, likeCount: -1, createdAt: -1 })
-        .limit(5),
-
-      Artist.find()
-        .sort({ followersCount: -1, monthlyListeners: -1, createdAt: -1 })
-        .limit(5),
-
-      Album.find()
-        .populate("artistId", "stageName artistName profileImage")
-        .sort({ totalPlays: -1, likeCount: -1, createdAt: -1 })
-        .limit(5),
-
-      Playlist.find()
-        .populate("userId", "name email role profileImage")
-        .sort({ playCount: -1, followerCount: -1, createdAt: -1 })
-        .limit(5),
+      new Promise((resolve) => {
+        const mockRes = { status: () => ({ json: resolve }) };
+        getDashboardOverview(req, mockRes);
+      }),
+      new Promise((resolve) => {
+        const mockReq = { query: { days } };
+        const mockRes = { status: () => ({ json: resolve }) };
+        getDashboardCharts(mockReq, mockRes);
+      }),
+      new Promise((resolve) => {
+        const mockReq = { query: { limit: 10 } };
+        const mockRes = { status: () => ({ json: resolve }) };
+        getTopContentAnalytics(mockReq, mockRes);
+      }),
+      new Promise((resolve) => {
+        const mockRes = { status: () => ({ json: resolve }) };
+        getGenreAnalytics(req, mockRes);
+      }),
+      new Promise((resolve) => {
+        const mockRes = { status: () => ({ json: resolve }) };
+        getLanguageAnalytics(req, mockRes);
+      }),
+      new Promise((resolve) => {
+        const mockReq = { query: { limit: 10 } };
+        const mockRes = { status: () => ({ json: resolve }) };
+        getRecentActivityAnalytics(mockReq, mockRes);
+      }),
     ]);
 
     res.status(200).json({
       success: true,
       dashboard: {
-        overview: {
-          users: totalUsers,
-          artists: totalArtists,
-          songs: totalSongs,
-          albums: totalAlbums,
-          playlists: totalPlaylists,
-          premiumUsers,
-          publishedSongs,
-          pendingSongs,
-          featuredPlaylists,
-        },
-
-        growth: {
-          users: {
-            current: currentUsers,
-            previous: previousUsers,
-            percentage: getGrowthPercentage(currentUsers, previousUsers),
-          },
-          songs: {
-            current: currentSongs,
-            previous: previousSongs,
-            percentage: getGrowthPercentage(currentSongs, previousSongs),
-          },
-        },
-
-        charts: {
-          users: userGrowthChart,
-          songs: songGrowthChart,
-          albums: albumGrowthChart,
-          playlists: playlistGrowthChart,
-        },
-
-        topContent: {
-          songs: topSongs,
-          artists: topArtists,
-          albums: topAlbums,
-          playlists: topPlaylists,
-        },
+        overview: overviewRes.overview || {},
+        charts: chartsRes.charts || {},
+        topContent: topContentRes.topContent || {},
+        genres: genresRes.genres || [],
+        languages: languagesRes.languages || [],
+        recentActivity: recentRes.activities || [],
       },
     });
   } catch (error) {
@@ -1021,15 +811,11 @@ const getFullAnalyticsDashboard = async (req, res) => {
 module.exports = {
   getDashboardOverview,
   getDashboardCharts,
-
-  // Aliases used by adminRoutes.js
   getPlatformStats: getPlatformStatistics,
   getTopContent: getTopContentAnalytics,
   getStatusAnalytics: getContentStatusAnalytics,
   getRecentActivity: getRecentActivityAnalytics,
   getFullDashboardAnalytics: getFullAnalyticsDashboard,
-
-  // Same names
   getGenreAnalytics,
   getLanguageAnalytics,
   getGrowthAnalytics,

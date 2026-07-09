@@ -2,6 +2,11 @@ const Playlist = require("../../models/Playlist");
 const Song = require("../../models/Song");
 const User = require("../../models/User");
 
+const notificationController = require("../notificationController");
+
+const createNotification =
+  notificationController.createNotification || (async () => null);
+
 const toBoolean = (value, defaultValue = false) => {
   if (value === undefined || value === null || value === "")
     return defaultValue;
@@ -16,6 +21,16 @@ const populatePlaylist = (query) =>
       "songs",
       "title artistId coverImage audio128 audio320 duration genre language isPublished status playCount likeCount",
     );
+
+const getCoverImage = (req) => {
+  return (
+    req.files?.coverImage?.[0]?.location ||
+    req.files?.cover?.[0]?.location ||
+    req.files?.coverImage?.[0]?.path ||
+    req.files?.cover?.[0]?.path ||
+    ""
+  );
+};
 
 const getAdminPlaylists = async (req, res) => {
   try {
@@ -103,6 +118,7 @@ const getAdminPlaylistById = async (req, res) => {
     });
   }
 };
+
 const createAdminPlaylist = async (req, res) => {
   try {
     const {
@@ -148,7 +164,7 @@ const createAdminPlaylist = async (req, res) => {
     const playlist = await Playlist.create({
       title: title.trim(),
       description: description?.trim() || "",
-      coverImage: req.files?.coverImage?.[0]?.location || "",
+      coverImage: getCoverImage(req),
       userId: ownerId,
       createdBy: req.user?.id || ownerId,
       createdByAdmin: toBoolean(createdByAdmin, true),
@@ -161,6 +177,16 @@ const createAdminPlaylist = async (req, res) => {
     const populatedPlaylist = await populatePlaylist(
       Playlist.findById(playlist._id),
     );
+
+    await createNotification({
+      userId: null,
+      title: "New playlist created",
+      message: `${populatedPlaylist.title} playlist has been created.`,
+      type: "playlist",
+      targetType: "playlist",
+      targetId: populatedPlaylist._id,
+      link: `/playlists/${populatedPlaylist._id}`,
+    });
 
     res.status(201).json({
       success: true,
@@ -187,6 +213,8 @@ const updateAdminPlaylist = async (req, res) => {
         message: "Playlist not found",
       });
     }
+
+    const oldTitle = playlist.title;
 
     const {
       title,
@@ -227,8 +255,10 @@ const updateAdminPlaylist = async (req, res) => {
       playlist.userId = userId;
     }
 
-    if (req.files?.coverImage?.[0]?.location) {
-      playlist.coverImage = req.files.coverImage[0].location;
+    const newCoverImage = getCoverImage(req);
+
+    if (newCoverImage) {
+      playlist.coverImage = newCoverImage;
     }
 
     if (isPublic !== undefined) {
@@ -260,6 +290,16 @@ const updateAdminPlaylist = async (req, res) => {
       Playlist.findById(playlist._id),
     );
 
+    await createNotification({
+      userId: null,
+      title: "Playlist updated",
+      message: `${oldTitle} playlist has been updated.`,
+      type: "playlist",
+      targetType: "playlist",
+      targetId: updatedPlaylist._id,
+      link: `/playlists/${updatedPlaylist._id}`,
+    });
+
     res.status(200).json({
       success: true,
       message: "Playlist updated successfully",
@@ -274,6 +314,7 @@ const updateAdminPlaylist = async (req, res) => {
     });
   }
 };
+
 const deleteAdminPlaylist = async (req, res) => {
   try {
     const playlist = await Playlist.findById(req.params.id);
@@ -285,7 +326,19 @@ const deleteAdminPlaylist = async (req, res) => {
       });
     }
 
+    const playlistTitle = playlist.title;
+
     await Playlist.findByIdAndDelete(req.params.id);
+
+    await createNotification({
+      userId: null,
+      title: "Playlist deleted",
+      message: `${playlistTitle} playlist has been deleted.`,
+      type: "playlist",
+      targetType: "playlist",
+      targetId: null,
+      link: "/playlists",
+    });
 
     res.status(200).json({
       success: true,
@@ -324,6 +377,16 @@ const makePlaylistPublic = async (req, res) => {
       Playlist.findById(playlist._id),
     );
 
+    await createNotification({
+      userId: null,
+      title: "Playlist made public",
+      message: `${populatedPlaylist.title} is now public.`,
+      type: "playlist",
+      targetType: "playlist",
+      targetId: populatedPlaylist._id,
+      link: `/playlists/${populatedPlaylist._id}`,
+    });
+
     res.status(200).json({
       success: true,
       message: "Playlist is now public",
@@ -361,6 +424,16 @@ const makePlaylistPrivate = async (req, res) => {
     const populatedPlaylist = await populatePlaylist(
       Playlist.findById(playlist._id),
     );
+
+    await createNotification({
+      userId: null,
+      title: "Playlist made private",
+      message: `${populatedPlaylist.title} is now private.`,
+      type: "playlist",
+      targetType: "playlist",
+      targetId: populatedPlaylist._id,
+      link: `/playlists/${populatedPlaylist._id}`,
+    });
 
     res.status(200).json({
       success: true,
@@ -411,6 +484,16 @@ const addSongToPlaylist = async (req, res) => {
     if (!exists) {
       playlist.songs.push(songId);
       await playlist.save();
+
+      await createNotification({
+        userId: null,
+        title: "Song added to playlist",
+        message: `${song.title} has been added to ${playlist.title}.`,
+        type: "playlist",
+        targetType: "playlist",
+        targetId: playlist._id,
+        link: `/playlists/${playlist._id}`,
+      });
     }
 
     const updatedPlaylist = await populatePlaylist(
@@ -454,9 +537,26 @@ const removeSongFromPlaylist = async (req, res) => {
       });
     }
 
+    const song = await Song.findById(songId);
+    const existed = playlist.songs.some((id) => id.toString() === songId);
+
     playlist.songs = playlist.songs.filter((id) => id.toString() !== songId);
 
     await playlist.save();
+
+    if (existed) {
+      await createNotification({
+        userId: null,
+        title: "Song removed from playlist",
+        message: `${song?.title || "A song"} has been removed from ${
+          playlist.title
+        }.`,
+        type: "playlist",
+        targetType: "playlist",
+        targetId: playlist._id,
+        link: `/playlists/${playlist._id}`,
+      });
+    }
 
     const updatedPlaylist = await populatePlaylist(
       Playlist.findById(playlist._id),
@@ -476,6 +576,7 @@ const removeSongFromPlaylist = async (req, res) => {
     });
   }
 };
+
 const getPlaylistAnalytics = async (req, res) => {
   try {
     const playlist = await Playlist.findById(req.params.id).populate(

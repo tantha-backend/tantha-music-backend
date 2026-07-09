@@ -2,9 +2,15 @@ const Album = require("../../models/Album");
 const Artist = require("../../models/Artist");
 const Song = require("../../models/Song");
 
+const notificationController = require("../notificationController");
+
+const createNotification =
+  notificationController.createNotification || (async () => null);
+
 const toBoolean = (value, defaultValue = false) => {
   if (value === undefined || value === null || value === "")
     return defaultValue;
+
   return value === true || value === "true";
 };
 
@@ -12,6 +18,16 @@ const populateAlbum = (query) =>
   query
     .populate("artistId", "stageName artistName profileImage")
     .populate("songs");
+
+const getArtistDisplayName = (artist) => {
+  return (
+    artist?.stageName ||
+    artist?.artistName ||
+    artist?.name ||
+    artist?.email ||
+    "Unknown Artist"
+  );
+};
 
 const getAdminAlbums = async (req, res) => {
   try {
@@ -27,6 +43,7 @@ const getAdminAlbums = async (req, res) => {
     });
   } catch (error) {
     console.error("Get admin albums error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to fetch albums",
@@ -54,6 +71,7 @@ const getAdminAlbumById = async (req, res) => {
     });
   } catch (error) {
     console.error("Get admin album by id error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to fetch album",
@@ -127,6 +145,18 @@ const createAdminAlbum = async (req, res) => {
 
     const populatedAlbum = await populateAlbum(Album.findById(album._id));
 
+    await createNotification({
+      userId: null,
+      title: "New album created",
+      message: `${populatedAlbum.title} by ${getArtistDisplayName(
+        populatedAlbum.artistId,
+      )} has been created.`,
+      type: "album",
+      targetType: "album",
+      targetId: populatedAlbum._id,
+      link: "/albums",
+    });
+
     res.status(201).json({
       success: true,
       message: "Album created successfully",
@@ -134,6 +164,7 @@ const createAdminAlbum = async (req, res) => {
     });
   } catch (error) {
     console.error("Create admin album error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to create album",
@@ -152,6 +183,8 @@ const updateAdminAlbum = async (req, res) => {
         message: "Album not found",
       });
     }
+
+    const oldTitle = album.title;
 
     const fields = [
       "title",
@@ -222,6 +255,16 @@ const updateAdminAlbum = async (req, res) => {
 
     const updatedAlbum = await populateAlbum(Album.findById(album._id));
 
+    await createNotification({
+      userId: null,
+      title: "Album updated",
+      message: `${oldTitle} album has been updated.`,
+      type: "album",
+      targetType: "album",
+      targetId: updatedAlbum._id,
+      link: `/albums/${updatedAlbum._id}`,
+    });
+
     res.status(200).json({
       success: true,
       message: "Album updated successfully",
@@ -229,6 +272,7 @@ const updateAdminAlbum = async (req, res) => {
     });
   } catch (error) {
     console.error("Update admin album error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to update album",
@@ -239,7 +283,10 @@ const updateAdminAlbum = async (req, res) => {
 
 const deleteAdminAlbum = async (req, res) => {
   try {
-    const album = await Album.findById(req.params.id);
+    const album = await Album.findById(req.params.id).populate(
+      "artistId",
+      "stageName artistName profileImage",
+    );
 
     if (!album) {
       return res.status(404).json({
@@ -248,9 +295,22 @@ const deleteAdminAlbum = async (req, res) => {
       });
     }
 
+    const albumTitle = album.title;
+    const artistName = getArtistDisplayName(album.artistId);
+
     await Song.updateMany({ albumId: album._id }, { $set: { albumId: null } });
 
     await Album.findByIdAndDelete(req.params.id);
+
+    await createNotification({
+      userId: null,
+      title: "Album deleted",
+      message: `${albumTitle} by ${artistName} has been deleted.`,
+      type: "album",
+      targetType: "album",
+      targetId: null,
+      link: "/albums",
+    });
 
     res.status(200).json({
       success: true,
@@ -258,6 +318,7 @@ const deleteAdminAlbum = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete admin album error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to delete album",
@@ -284,6 +345,18 @@ const publishAdminAlbum = async (req, res) => {
       });
     }
 
+    await createNotification({
+      userId: null,
+      title: "Album published",
+      message: `${album.title} by ${getArtistDisplayName(
+        album.artistId,
+      )} has been published.`,
+      type: "album",
+      targetType: "album",
+      targetId: album._id,
+      link: `/albums/${album._id}`,
+    });
+
     res.status(200).json({
       success: true,
       message: "Album published successfully",
@@ -291,6 +364,7 @@ const publishAdminAlbum = async (req, res) => {
     });
   } catch (error) {
     console.error("Publish admin album error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to publish album",
@@ -317,6 +391,18 @@ const unpublishAdminAlbum = async (req, res) => {
       });
     }
 
+    await createNotification({
+      userId: null,
+      title: "Album unpublished",
+      message: `${album.title} by ${getArtistDisplayName(
+        album.artistId,
+      )} has been unpublished.`,
+      type: "album",
+      targetType: "album",
+      targetId: album._id,
+      link: `/albums/${album._id}`,
+    });
+
     res.status(200).json({
       success: true,
       message: "Album unpublished successfully",
@@ -324,6 +410,7 @@ const unpublishAdminAlbum = async (req, res) => {
     });
   } catch (error) {
     console.error("Unpublish admin album error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to unpublish album",
@@ -372,6 +459,18 @@ const addSongToAlbum = async (req, res) => {
 
     const updatedAlbum = await populateAlbum(Album.findById(album._id));
 
+    if (!songExists) {
+      await createNotification({
+        userId: null,
+        title: "Song added to album",
+        message: `${song.title} has been added to ${album.title}.`,
+        type: "album",
+        targetType: "album",
+        targetId: album._id,
+        link: `/albums/${album._id}`,
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: songExists
@@ -381,6 +480,7 @@ const addSongToAlbum = async (req, res) => {
     });
   } catch (error) {
     console.error("Add song to album error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to add song to album",
@@ -410,6 +510,8 @@ const removeSongFromAlbum = async (req, res) => {
       });
     }
 
+    const songWasInAlbum = album.songs.some((id) => id.toString() === songId);
+
     album.songs = album.songs.filter((id) => id.toString() !== songId);
 
     if (song && song.albumId?.toString() === album._id.toString()) {
@@ -421,6 +523,20 @@ const removeSongFromAlbum = async (req, res) => {
 
     const updatedAlbum = await populateAlbum(Album.findById(album._id));
 
+    if (songWasInAlbum) {
+      await createNotification({
+        userId: null,
+        title: "Song removed from album",
+        message: `${song?.title || "A song"} has been removed from ${
+          album.title
+        }.`,
+        type: "album",
+        targetType: "album",
+        targetId: album._id,
+        link: `/albums/${album._id}`,
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: "Song removed from album successfully",
@@ -428,6 +544,7 @@ const removeSongFromAlbum = async (req, res) => {
     });
   } catch (error) {
     console.error("Remove song from album error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to remove song from album",
@@ -465,6 +582,7 @@ const getAlbumAnalytics = async (req, res) => {
     });
   } catch (error) {
     console.error("Get album analytics error:", error);
+
     res.status(500).json({
       success: false,
       message: "Failed to fetch album analytics",

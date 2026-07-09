@@ -3,6 +3,21 @@ const Artist = require("../../models/Artist");
 const Album = require("../../models/Album");
 const User = require("../../models/User");
 
+const notificationController = require("../notificationController");
+
+const createNotification =
+  notificationController.createNotification || (async () => null);
+
+const getArtistDisplayName = (artist) => {
+  return (
+    artist?.stageName ||
+    artist?.artistName ||
+    artist?.name ||
+    artist?.email ||
+    "Unknown Artist"
+  );
+};
+
 const getAvailableArtistUsers = async (req, res) => {
   try {
     const existingArtists = await Artist.find().select("userId");
@@ -251,6 +266,16 @@ const createAdminArtist = async (req, res) => {
       "name email role",
     );
 
+    await createNotification({
+      userId: null,
+      title: "New artist created",
+      message: `${getArtistDisplayName(populatedArtist)} has been added as an artist.`,
+      type: "artist",
+      targetType: "artist",
+      targetId: populatedArtist._id,
+      link: "/artists",
+    });
+
     return res.status(201).json({
       success: true,
       message: "Artist profile created successfully",
@@ -277,6 +302,8 @@ const updateAdminArtist = async (req, res) => {
         message: "Artist not found",
       });
     }
+
+    const oldName = getArtistDisplayName(artist);
 
     const { stageName, bio, fanClubPrice, isVerified, isMonetized } = req.body;
 
@@ -315,6 +342,16 @@ const updateAdminArtist = async (req, res) => {
       "name email role",
     );
 
+    await createNotification({
+      userId: null,
+      title: "Artist updated",
+      message: `${oldName} profile has been updated.`,
+      type: "artist",
+      targetType: "artist",
+      targetId: updatedArtist._id,
+      link: `/artists/${updatedArtist._id}`,
+    });
+
     return res.status(200).json({
       success: true,
       message: "Artist updated successfully",
@@ -342,6 +379,8 @@ const deleteAdminArtist = async (req, res) => {
       });
     }
 
+    const artistName = getArtistDisplayName(artist);
+
     const songsCount = await Song.countDocuments({
       artistId: artist._id,
     });
@@ -365,6 +404,16 @@ const deleteAdminArtist = async (req, res) => {
         await user.save();
       }
     }
+
+    await createNotification({
+      userId: null,
+      title: "Artist deleted",
+      message: `${artistName} artist profile has been deleted.`,
+      type: "artist",
+      targetType: "artist",
+      targetId: null,
+      link: "/artists",
+    });
 
     return res.status(200).json({
       success: true,

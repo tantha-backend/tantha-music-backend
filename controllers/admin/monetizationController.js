@@ -1170,8 +1170,126 @@ const getPlatformRevenue = async (req, res) => {
     return sendError(res, 500, "Failed to fetch platform revenue");
   }
 };
+const getMonetizationDashboard = async (req, res) => {
+  try {
+    const [overview, revenueChart, premium, coffee, fanClub, topArtists] =
+      await Promise.all([
+        sumAmount(PremiumSubscription, {
+          status: { $in: ["active", "completed", "paid", "success"] },
+        }),
+        getRevenueChartData(),
+        PremiumSubscription.find()
+          .populate("userId", "name email role")
+          .sort({ createdAt: -1 })
+          .limit(10),
+        CoffeeSupport.find()
+          .populate("supporterId", "name email role")
+          .populate("artistId", "stageName artistName")
+          .sort({ createdAt: -1 })
+          .limit(10),
+        FanClubSubscription.find()
+          .populate("userId", "name email role")
+          .populate("artistId", "stageName artistName")
+          .sort({ createdAt: -1 })
+          .limit(10),
+        Artist.find()
+          .select("stageName artistName profileImage followersCount")
+          .sort({ followersCount: -1 })
+          .limit(10),
+      ]);
+
+    const coffeeTotal = await sumAmount(CoffeeSupport, {
+      paymentStatus: { $in: ["completed", "paid", "success"] },
+    });
+
+    const fanClubTotal = await sumAmount(FanClubSubscription, {
+      status: { $in: ["active", "completed", "paid", "success"] },
+    });
+
+    const premiumRevenue = overview.total || 0;
+    const coffeeRevenue = coffeeTotal.total || 0;
+    const fanClubRevenue = fanClubTotal.total || 0;
+    const totalRevenue = premiumRevenue + coffeeRevenue + fanClubRevenue;
+
+    const recentTransactions = [
+      ...premium.map((item) => ({
+        _id: item._id,
+        type: "premium",
+        amount: item.amount || 0,
+        status: item.status,
+        user: item.userId,
+        createdAt: item.createdAt,
+      })),
+      ...coffee.map((item) => ({
+        _id: item._id,
+        type: "coffee",
+        amount: item.amount || 0,
+        status: item.paymentStatus,
+        user: item.supporterId,
+        artist: item.artistId,
+        createdAt: item.createdAt,
+      })),
+      ...fanClub.map((item) => ({
+        _id: item._id,
+        type: "fanclub",
+        amount: item.amount || 0,
+        status: item.status,
+        user: item.userId,
+        artist: item.artistId,
+        createdAt: item.createdAt,
+      })),
+    ]
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 10);
+
+    return res.status(200).json({
+      success: true,
+      totalRevenue,
+      premiumRevenue,
+      coffeeRevenue,
+      fanClubRevenue,
+      revenueChart,
+      subscriptionChart: [
+        { name: "Premium", value: premiumRevenue },
+        { name: "Coffee", value: coffeeRevenue },
+        { name: "Fan Club", value: fanClubRevenue },
+      ],
+      revenueBreakdown: [
+        { name: "Premium", value: premiumRevenue },
+        { name: "Coffee Support", value: coffeeRevenue },
+        { name: "Fan Club", value: fanClubRevenue },
+      ],
+      premiumSubscribers: premium,
+      coffeeSupports: coffee,
+      fanClubMemberships: fanClub,
+      topEarningArtists: topArtists,
+      recentTransactions,
+    });
+  } catch (error) {
+    console.error("Get monetization dashboard error:", error);
+    return sendError(res, 500, "Failed to fetch monetization dashboard");
+  }
+};
+
+const getRevenueChartData = async () => {
+  return Array.from({ length: 30 }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - (29 - index));
+
+    return {
+      date: date.toISOString().split("T")[0],
+      label: date.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+      }),
+      revenue: 0,
+      value: 0,
+    };
+  });
+};
 
 module.exports = {
+  getMonetizationDashboard,
   getRevenueOverview,
 
   getPremiumSubscriptions,

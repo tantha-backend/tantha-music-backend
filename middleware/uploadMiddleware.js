@@ -27,9 +27,7 @@ const allowedMimeTypes = [
 ];
 
 const fileFilter = (req, file, cb) => {
-  if (!file) {
-    return cb(null, true);
-  }
+  if (!file) return cb(null, true);
 
   if (allowedMimeTypes.includes(file.mimetype)) {
     return cb(null, true);
@@ -42,7 +40,7 @@ const fileFilter = (req, file, cb) => {
   );
 };
 
-const uploadToS3 = multer({
+const upload = multer({
   storage: multerS3({
     s3,
     bucket: process.env.AWS_S3_BUCKET_NAME,
@@ -54,12 +52,7 @@ const uploadToS3 = multer({
 
       let folder = "uploads";
 
-      /*
-      |--------------------------------------------------------------------------
-      | Songs
-      |--------------------------------------------------------------------------
-      */
-
+      // Songs
       if (file.fieldname === "audio128") {
         folder = "songs/audio128";
       }
@@ -69,20 +62,15 @@ const uploadToS3 = multer({
       }
 
       if (
-        file.fieldname === "coverImage" &&
+        (file.fieldname === "cover" || file.fieldname === "coverImage") &&
         req.originalUrl.includes("/songs")
       ) {
         folder = "songs/covers";
       }
 
-      /*
-      |--------------------------------------------------------------------------
-      | Albums
-      |--------------------------------------------------------------------------
-      */
-
+      // Albums
       if (
-        file.fieldname === "coverImage" &&
+        (file.fieldname === "cover" || file.fieldname === "coverImage") &&
         req.originalUrl.includes("/albums")
       ) {
         folder = "albums/covers";
@@ -95,12 +83,7 @@ const uploadToS3 = multer({
         folder = "albums/banners";
       }
 
-      /*
-      |--------------------------------------------------------------------------
-      | Artists
-      |--------------------------------------------------------------------------
-      */
-
+      // Artists
       if (file.fieldname === "profileImage") {
         folder = "artists/profile";
       }
@@ -123,4 +106,4 @@ const uploadToS3 = multer({
   },
 });
 
-module.exports = uploadToS3;
+module.exports = upload;
